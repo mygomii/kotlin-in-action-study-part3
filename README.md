@@ -49,3 +49,32 @@
 | 비동기 지원 | 직접 관리 (callback, Future 등) | 언어 차원 (suspend, launch) |
 
 </details>
+
+
+<details>
+<summary><strong>14.4 잠시 멈출 수 있는 함수: 일시 중단 함수</strong></summary>
+
+- 코틀린 코루틴이 스레드, 반응형 스트림, 콜백과 같은 다른 동시성 접근 방식과 다른 핵심 속성으로 상당수의 경우 코드 형태를 크게 변경할 필요가 없다는 점
+
+## 14.4.1 일시 중단 함수를 사용한 코드는 순차적을 보인다
+
+- 코루틴의 `일시 중단 함수(suspend 함수)`를 사용하면, 코드가 **비동기 작업임에도 마치 동기적이고 순차적인 코드처럼 보임**
+- 콜백 기반의 코드(콜백 지옥)나 반응형 스트림 코드와 달리, 코루틴의 `suspend` 함수는 **중단과 재개**가 자연스럽게 처리되므로 코드의 가독성이 높아짐
+
+```kotlin
+// 콜백 기반
+api.fetchData { result ->
+    process(result) {
+        updateUI(it)
+    }
+}
+```
+
+```kotlin
+// 코루틴
+val data = api.fetchData()
+val processed = process(data)
+updateUI(processed)
+```
+
+</details>
