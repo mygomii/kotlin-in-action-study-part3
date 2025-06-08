@@ -78,3 +78,77 @@ updateUI(processed)
 ```
 
 </details>
+
+
+<details>
+<summary><strong>14.5 코루틴을 다른 접근 방법과 비교 </strong></summary>
+
+- 자바나 다른 프로그래밍 언어에서 동시성 코드를 작성하느 다른 접근 방식을 사용한 경험이 있다면 이들과 코루틴이 어떻게 다른지, 또 코루틴이 어떻게 더 나은지 확인하고 싶을 거임
+
+```kotlin
+// 콜백을 써서 여러 함수를 연속적으로 호출
+fun fetchData(callback: (String) -> Unit) 
+fun processData(data: String, callback: (String) -> Unit) 
+fun displayResult(result: String) 
+
+fun main() {
+    fetchData { data ->
+        processData(data) { processed ->
+            displayResult(processed)
+        }
+    }
+}
+```
+
+- 이런 예제는 콜백 지옥이라는 별명으로 널리 알려져 있음
+
+```kotlin
+// 퓨쳐를 사용해 여러 함수를 연속적을 호출 
+fun fetchData(): CompletableFuture<String> 
+fun processData(data: String): CompletableFuture<String> 
+fun displayResult(result: String) 
+
+fun main() {
+    fetchData()
+	    .thenCompose { data -> processData(data) }
+	    .thenAccept { processed -> displayResult(processed) }
+}
+```
+
+```kotlin
+// 반응형 스트림을 사용해 같은 로직 구현하기 
+fun fetchData(): Single<String> 
+fun processData(data: String): Single<String> 
+fun displayResult(result: String)
+
+fun main() {
+    fetchData()
+	    .flatMap { data -> processData(data) }
+	    .subscribe { processed ->
+		    displayResult(processed)
+      }
+}
+```
+
+- 두 접근 방식 모두 인지적 부가 비용이 있고, 함수를 선언하거나 사용할 때 새로운연산자를 코드에 도입해야함
+- 이와 비교해보면 코틀린. 코루틴을 사용하는 접근 방식에서는 함수에 `suspend` 변경자만 추가하면 됨
+- 나머지 코드는 그대로 순차적인 모양을 유지하면서도 여전히 스레드를 블록시키는 단점을 피할 수. ㅣㅆ음
+
+## 14.5.1 일시 중단 함수 호출
+
+```kotlin
+
+suspend fun fetchData(): String 
+suspend fun processData(data: String): String 
+fun displayResult(result: String) 
+
+fun main() = runBlocking {
+    val data = fetchData()
+    val processed = processData(data)
+    displayResult(processed)
+}
+```
+
+- 일시 중단 함수는 실행을 일시 중단할 수 있기 때문에 일반 코드 아무 곳에서나 호출 할 수 없음
+- 일시 중단 함수는 일시 중단할 수 있는 코드 블록 안에서만 호출할 수 있음
+</details>
