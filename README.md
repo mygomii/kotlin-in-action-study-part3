@@ -194,3 +194,133 @@ launch {
 - `.await()`를 호출해 결과를 가져옴
 - 
 </details>
+
+<details>
+<summary><strong>14.7 어디서 코드를 실행할지 정하기: 디스패처 </strong></summary>
+	
+- 코루틴의 디스패처는 코루틴을 실행할 스레드를 결정함
+- 본질적으로 코루틴은 특정 스레드에 고정되지 않음
+- 코루틴은 한 스레드에서 실행을 일시중단하고 디스패처가 지시하는 대로 다른 스레드에서 실행을 재가할 수 있음
+
+---
+
+## 스레드 풀(`Thread pool`)이란?
+
+- 스레드 집합을 관리하고, 집합에 속한 스레드를 웨에서 작업(우리의 경우 코루틴) 실행을 허용
+- 작업이 실행될 때마다 새 스레드를 할당하는 대신, 스레드 풀은 일정한 수의 스레드를 유지하면서 내부 논리와 구현에 따라 들어오는 작업을 분배
+- 스레드를 새로 생성해 할당하고 시작하는 작업은 비용이 많이 들기 때문
+
+## 14.7.1 디스패처 선택
+
+- 코루틴은 기본적으로 부모 코루틴에서 디스패처를 상속 받으므로 모든 코루틴에 대해 명시적으로 디스패처를 지정할 필요 없음
+- 선택할 수 있는 디스패처들이 있음
+    - 코루틴을 기본 환경에서 실행할때 (`Dispatchers.Default`)
+    - UI 프레임워크와 함께 작업할 때 (`Dispatchers.Main`)
+    - 스레드를 블로킹하는 API를 사용할때 (`Dispatchers.IO`)
+
+- 다중 스레드를 사용하는 범용 디스패처:  `Dispatchers.Default`
+    - CPU 연산 집중적인 작업 (예: 계산, 정렬, 데이터 처리 등)에 적합
+    - 기본적으로 CPU 코어 수에 맞춰 스레드 풀 생성
+    - 예시: 데이터 파싱, 복잡한 알고리즘 실행
+    
+    ```kotlin
+    fun main() = runBlocking {
+        launch(Dispatchers.Default) {
+            println("Default Dispatcher: ${Thread.currentThread().name}")
+            val sum = (1..1_000_000).sum()
+            println("Sum: $sum")
+        }
+    }
+    ```
+    
+- UI 스레드에서 실행: `Dispatchers.Main`
+    - Android나 JavaFX/Swing에서 UI 업데이트나 사용자 인터랙션 처리
+    - 화면 그리기, 뷰 변경, 사용자 입력 처리 등
+    - 예시: 버튼 클릭 리스너에서 API 호출 후 UI 반영
+    
+    ```kotlin
+    class MainActivity : AppCompatActivity() {
+        override fun onCreate(savedInstanceState: Bundle?) {
+            super.onCreate(savedInstanceState)
+    
+            CoroutineScope(Dispatchers.Main).launch {
+                // UI 스레드에서 실행됨
+                println("Main Dispatcher: ${Thread.currentThread().name}")
+                // 예: 버튼 클릭 후 UI 갱신
+            }
+        }
+    }
+    ```
+    
+- 블로킹되는 IO 작업 처리: `Dispatchers.IO`
+    - 파일, 네트워크, 디스크, 데이터베이스 등 입출력 작업
+    - 블로킹 호출이 많은 작업에 적합
+    - 많은 수의 스레드를 동적으로 생성하여 효율적으로 처리
+    
+    ```kotlin
+    fun main() = runBlocking {
+        launch(Dispatchers.IO) {
+            println("IO Dispatcher: ${Thread.currentThread().name}")
+            val content = readFile("example.txt")
+            println("파일 내용:\n$content")
+        }
+    }
+    
+    suspend fun readFile(path: String): String {
+        // 파일 읽기 (Blocking)
+        return File(path).readText()
+    }
+    ```
+    
+
+| **Dispatcher** | **특징** | **예시** |
+| --- | --- | --- |
+| Dispatchers.Default | CPU 연산 집중 작업 | 리스트 합계, 데이터 분석 |
+| Dispatchers.Main | UI 스레드 (Android) | 버튼 클릭, TextView 갱신 |
+| Dispatchers.IO | 블로킹 I/O 작업 | 파일 읽기, 네트워크 |
+
+## 14.7.2 코루틴 빌더에 디스패처에 전달
+
+- 코루틴 빌더(`launch`, `async`, `runBlocking`)에 **디스패처를 직접 전달**하여 해당 코루틴이 어떤 스레드에서 실행될지 명확히 지정할 수 있음
+- 이렇게 하면 특정 작업이 CPU 연산인지, UI 작업인지, I/O 작업인지에 따라 적절한 디스패처를 선택해 효율적으로 실행할 수 있음
+
+## 14.7.3 withContext를 사용해 코루틴 안에서 디스패처 바꾸기
+
+- 코루틴 안에서 다른 디스패처로 작업을 실행해야 할 때는 `withContext()`를 사용해야함
+- `withContext()`는 **중단점(`suspend point`)을 제공**하며, 지정한 디스패처에서 실행한 후 결과를 반환함
+- ex)
+    - UI에서 네트워크 호출이 필요할 때, 메인(UI) 디스패처에서 코루틴이 실행 중이라면,
+    - 네트워크 호출은 Dispatchers.IO에서 실행하도록 스위칭하고,
+    - 결과를 받아서 UI 업데이트는 다시 Dispatchers.Main으로 돌아가면 됨
+
+```kotlin
+import kotlinx.coroutines.*
+
+fun main() = runBlocking {
+    launch(Dispatchers.Main) {
+        val data = withContext(Dispatchers.IO) {
+            fetchData()
+        }
+        updateUI(data)
+    }
+}
+
+suspend fun fetchData(): String {
+    delay(1000) // 네트워크 호출 시뮬레이션
+    return "data from server"
+}
+
+fun updateUI(data: String) {
+    println("UI 업데이트: $data")
+}
+```
+
+- `fetchData()`는 I/O 디스패처에서 실행됨.
+- `updateUI()`는 다시 메인(UI) 디스패처로 돌아옴.
+
+## 14.7.4 코루틴과 디스패처는 스레드 안전성 문제에 대한 마법 같은 해결책이 아니다
+
+- **코루틴과 디스패처**는 여러 스레드 간의 작업 분배를 쉽게 해주지만, **스레드 안전성 자체를 보장하지는 않음**
+- 공유된 가변 상태(예: 변수, 컬렉션)에 접근할 때는 여전히 **적절한 동기화**가 필요함
+- 예를 들어 `Dispatchers.Default`로 실행되는 여러 코루틴이 동시에 같은 변수에 접근하면 `Race Condition(경쟁 상태)`이 발생할 수 있다.
+</details>
