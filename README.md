@@ -324,3 +324,15 @@ fun updateUI(data: String) {
 - 공유된 가변 상태(예: 변수, 컬렉션)에 접근할 때는 여전히 **적절한 동기화**가 필요함
 - 예를 들어 `Dispatchers.Default`로 실행되는 여러 코루틴이 동시에 같은 변수에 접근하면 `Race Condition(경쟁 상태)`이 발생할 수 있다.
 </details>
+
+
+<details>
+<summary><strong>14.8 코루틴은 코루틴 콘텍스트에 추가적인 정보를 담고 있다.</strong></summary>
+
+- `코루틴 컨텍스트(CoroutineContext)`는 코루틴의 실행 환경을 정의하는 메타정보를 담고 있음
+- 이 컨텍스트에는 디스패처뿐만 아니라 **`Job`, `CoroutineName`, 예외 처리자 등 추가 정보**도 들어감
+    - `Dispatchers.IO` → 디스패처 지정
+    - `Job` → 코루틴의 취소와 완료 상태 관리
+    - `CoroutineName` → 디버깅용 이름 태깅
+    - `CoroutineExceptionHandler` → 예외 처리기
+</details>
