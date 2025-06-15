@@ -336,3 +336,178 @@ fun updateUI(data: String) {
     - `CoroutineName` → 디버깅용 이름 태깅
     - `CoroutineExceptionHandler` → 예외 처리기
 </details>
+
+
+<hr>
+<details>
+<summary><strong>15.1 코루틴 스코프가 코루틴 간의 구조를 확립한다</strong></summary>
+	
+- 구조화된 동시성을 통해 각 코루틴은 코루틴 스코프에 속하게 됨
+- 코루틴 스코프는 코루틴 간의 부모-자식 관계를 확립하는데 도움을 줌
+- `launch`, `asyn` 코루틴 빌더 함수들은 사실 `CoroutineScope` 인터페이스의 확장 함수
+- 즉 다른 쿠로틴 빌더의 본문에서 `launch`, `asyn` 를 사용해 새로운 코루틴을 만들면 이 새로운 코루틴은 자동으로 해당 코루틴의 자식이 됨
+
+```kotlin
+fun main(): Unit = runBlocking {
+    launch {
+        delay(200)
+        println("Task from runBlocking")
+    }
+
+    coroutineScope { // 새로운 코루틴 스코프 생성
+        launch {
+            delay(500)
+            println("Task from nested launch")
+        }
+
+        delay(100)
+        println("Task from coroutineScope")
+    }
+
+    println("Coroutine scope is over")
+}
+
+/* 예상출력
+Task from coroutineScope  
+Task from runBlocking  
+Task from nested launch  
+Coroutine scope is over
+*/
+```
+
+- `runBlocking` 이 부모 스코프 역할
+- `coroutineScope` 안에서 또 다른 코루틴 스코프 생성됨
+- `coroutineScope` 내에서 `launch` 로 자식 코루틴 시작
+- 모든 자식이 끝날 때까지 `coroutineScope`는 종료되지 않음
+
+## 15.1.1 코루틴 스코프 생성: `coroutineScope`  함수
+
+- `coroutineScope { ... }` 함수는 **새로운 코루틴 스코프**를 생성
+- 이 스코프 내에서 시작된 코루틴은 **모두 자식 코루틴**이 됨
+- 부모 코루틴은 **자식들이 전부 완료될 때까지 기다림**
+- **`구조화된 동시성(structured concurrency)`** 을 구현하는 핵심 함수 중 하나
+
+| 함수 이름 | coroutineScope |
+| --- | --- |
+| 반환 시점 | **모든 자식 코루틴이 끝난 후** |
+| 차이점 | launch는 Job 반환, coroutineScope는 결과값 반환 |
+| 예외 처리 | 자식 중 하나라도 예외가 나면 스코프 전체가 종료됨 |
+
+```kotlin
+fun main() = runBlocking {
+    coroutineScope {
+        launch {
+            delay(1000)
+            println("Child coroutine 1")
+        }
+
+        launch {
+            delay(500)
+            println("Child coroutine 2")
+        }
+
+        println("All children launched")
+    }
+
+    println("coroutineScope 끝남")
+}
+
+/* 결과 
+All children launched  
+Child coroutine 2  
+Child coroutine 1  
+coroutineScope 끝남
+*/
+```
+
+- `coroutineScope`는 **모든 자식 *코루틴이 완료될 때까지 기다리는 구조화*된 코루틴 블록**
+
+## 15.1.2 코루틴 스코프를 컴포넌트와 연관시키기: `CoroutineScope`
+
+- `CoroutineScope`는 코루틴을 실행할 컨텍스트(Context) 를 담고 있는 인터페이스.
+- 일반적으로 컴포넌트(예: ViewModel, Activity 등)에 코루틴을 묶어서, 컴포넌트가 사라질 때 코루틴도 같이 종료되도록 함
+
+```kotlin
+class MyComponent : CoroutineScope {
+    private val job = Job()
+
+    override val coroutineContext: CoroutineContext
+        get() = Dispatchers.Main + job
+
+    fun destroy() {
+        job.cancel() // 컴포넌트 종료 시 모든 코루틴 취소
+    }
+}
+```
+
+- `job.cancel()` 호출 시, 이 `scope` 안에서 시작된 모든 코루틴이 취소됨.
+- 이 구조를 쓰면 메모리 누수나 유령 코루틴`(leaking coroutine)` 을 막을 수 있음
+
+---
+
+- `Android ViewModel`에는 이미 `viewModelScope`가 있음.
+- 이 `scope`에 코루틴을 연결하면 `ViewModel`이 사라질 때 자동 취소됨.
+
+| 목적 | 컴포넌트와 코루틴의 수명 일치 |
+| --- | --- |
+| 구현 방식 | 클래스에 CoroutineScope 구현 + Job 보관 |
+| 장점 | 자원 누수 방지, 안전한 구조화된 동시성 |
+| Android 예시 | viewModelScope, lifecycleScope 사용 |
+
+### **CoroutineScope vs coroutineScope 차이**
+
+| **항목** | CoroutineScope **(인터페이스)** | coroutineScope **(함수)** |
+| --- | --- | --- |
+| 정체 | **인터페이스** | **suspend 함수** |
+| 목적 | 클래스에 코루틴 실행 환경을 부여 | 코루틴 안에서 **자식 코루틴을 안전하게 실행** |
+| 주 용도 | ViewModel, Activity 등에서 **코루틴 생명주기 관리** | 특정 suspend 블록 안에서 **코루틴을 구조화** |
+| 컨텍스트 | coroutineContext 프로퍼티로 제공 | 부모 컨텍스트를 자동 상속 |
+| 종료 처리 | Job.cancel() 로 **전체 코루틴 종료** | 블록 내 자식이 끝날 때까지 **자동으로 대기** |
+| 예 | viewModelScope, lifecycleScope | coroutineScope { launch { ... } } |
+- **`*CoroutineScope`**는 **스코프를 담는 그릇***
+- **`*coroutineScope`**는 **일시적으로 안전한 구조를 만들어주는** `suspend 블록`*
+
+## 15.1.3 GlobalScope의 위험성
+
+- GlobalScope는 전역 스코프
+    - 앱이 종료되거나 프로세스가 죽지 않는 이상, 코루틴이 계속 실행됨.
+    - 그래서 일반적인 코루틴과 달리, 부모 스코프와 관계없이 독립적으로 동작함
+- 생명 주기와 무관
+    - `Activity`, `ViewModel`, `Fragment` 등이 사라져도 코루틴은 계속 실행됨.
+    - 메모리 누수(leak) 와 예상치 못한 동작 발생 가능
+- 예외 전파 안 됨
+    - `GlobalScope`에서 발생한 예외는 부모 코루틴으로 전파되지 않음.
+    - `구조화된 동시성(structured concurrency)`의 장점이 사라짐
+- 취소 불가
+    - `GlobalScope.launch { ... }` 로 만든 코루틴은 명시적으로 잡지 않으면 취소할 방법이 없음.
+
+```kotlin
+// 예제 (문제 있는 코드)
+fun startSomething() {
+    GlobalScope.launch {
+        delay(1000)
+        println("Global coroutine finished")
+    }
+}
+```
+
+- !!!구조화된 스코프 사용해야함!!!
+    - `viewModelScope`, `lifecycleScope`, `coroutineScope`, `supervisorScope` 같은 스코프를 명확히 지정해서 사용해야 안전
+
+## 15.1.4 코루틴 콘텍스트와 구조화된 동시성
+
+- 코루틴은 항상 `CoroutineContext`를 가지고 실행됨
+    - 예: `Dispatchers.Main`, `Job`, `CoroutineName`, `CoroutineExceptionHandler` 등
+- 이 코루틴 콘텍스트는 부모 → 자식으로 상속됨
+- 즉, `launch`나 `async`로 새 코루틴을 만들면 부모 코루틴의 콘텍스트를 자동으로 이어받음
+- 콘텍스트에는 중요한 요소인 Job이 포함돼 있어서, 자식 코루틴이 부모와 연결되고, 부모가 취소되면 자식도 같이 취소됨
+- 이것이 구조화된 동시성(Structured Concurrency) 의 핵심!
+
+| **요소** | **역할** |
+| --- | --- |
+| CoroutineContext | 코루틴 실행 환경 |
+| Job | 코루틴의 생명 주기 및 계층 관리 |
+| Dispatcher | 어떤 스레드에서 실행할지 결정 |
+| Name, ExceptionHandler | 디버깅, 예외 처리에 사용 |
+
+</details>
