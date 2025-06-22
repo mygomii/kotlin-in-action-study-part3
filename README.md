@@ -511,3 +511,205 @@ fun startSomething() {
 | Name, ExceptionHandler | 디버깅, 예외 처리에 사용 |
 
 </details>
+
+
+<details>
+<summary><strong>15.2 취소</strong></summary>
+
+- 취소는 코드가 완료되기 전에 실행을 중단하는 것을 의미
+- 현대 애플리케이션은 계산 작업을 취소할 수 있어야 견고하고 효율적임
+- 취소는 불필요한 작업을 막아줌
+- 취소는 메모리나 리소스 누수를 방지하는 데도 도움을 줌
+- 취소는 오류 처리에서도 중요한 역할을 함
+
+## 15.2.1 취소 촉발
+
+- 여러 코루틴 빌더 함수의 반환값을 취소를 톡발하는 핸들로 사용할 수 있음
+- `launch` 코루틴 빌더는 `Job` 을  반환하고 `async` 코루틴 빌더는 `Deferred` 를 반환함
+- 둘다 `cancel` 을 호출해 해당 코루틴의 취소를 촉발할 수 있음
+
+## 15.2.2 시간제한이 초과된 후 자동으로 취소 호출
+
+- 코틀린 코루틴 라이브러리는 코루틴의 취소를 자동으로 촉발할 수 있는 몇 가지 편리한 함수도 제공해줌
+- `withTimeout`, `withTimeoutOrNull` 함수는 계산에 쓸 최대 시간을 제한하면서 값을 계산할 수 있게 해줌
+- `withTimeout` 함수는 타임아웃이 되면 예외(`TimeoutCancellationException`)을 발생시킴, 타임아웃을 처리하면 `withTimeout` 호출을 `try` 블록으로 감싸고 발생한 `TimeoutCancellationException` 을 잡아내야함
+- `withTimeoutOrNull` 함수는 타임아웃이 발생하면 `null` 을 반환함
+
+*⇒ `withTimeout` 이 발생시키는 `TimeoutCancellationException` 을 잊지 말고 잡아야함, 잡지않으면 호출한 코루틴이 의도와 다르게 취소될 수 있음. 이 문제를 완전히 피하려면 `withTimeoutOrNull` 함수를 사용하는 편이 좋음*
+
+## 15.2.3 취소는 모든 지식 코루틴에게 전파된다
+
+- 코루틴을 취소하면 해당 코루틴의 모든 자식 코루틴도 자동으로 취소됨  이는 구조화된 동시성의 강력한 기능
+- 각 코루틴은 자신이 시작한 다른 코루틴을 알고 있기 때문에 취소할 때 스스로 자식들을 정리할 수 있으며, 불필요한 작업을 계속하거나 불필요하게 데이터를 메모리에 더 오래 유지하는 제멋대로인 코루틴이 남지 않음
+
+## 15.2.4 취소된 코루틴은 특별하 지점에서 CancellationException을 던진다
+
+- 취소 매커니즘은 `CancellationException` 이라는 특수한 예외를 특별한 지점에서 던지는 방식으로 작동함
+- 취소된 코루틴은 이시 중단 지점에서 `CancellationException` 을 던짐, 일시 중단 지점은 코루틴의 실행을 일시 중단할 수 있는 지점
+- 일반적으로 코루틴 라이브러리 안의 모든 일시 중단 함수는 `CancellationException` 이 던져질 수 있는 지점을 도입
+
+```kotlin
+coroutineScope {
+	log("A")
+	delay(500.milliseconds) // <- 이 지점에서 함수가 취소될 수 있음 
+	log("B")
+	log("C")
+}
+```
+
+- 위 코드에서는 영역이 취소됐는지 여부에 따라 `A` 나 `ABC` 가 출력되며, `AB` 는 절대 출력되지 않음. 이는 `B` 와 `C` 사이에 취소 지점이 없기 때문
+
+## 15.2.5 취소는 협력적이다
+
+- 코틀린 코루틴에 기본적으로 포함된 모든 함수는 이 취소 가능함
+- `ktor` 같은 라이브러리에서 제공하는 일시 중단 API를 사용할 때도 해당 라이브러리의 일시 중단 함수는 내부적으로 취소 가능하다고 가정할 수 있음
+- 하지만 직접 작성한 코드에서는 직접 코루틴을 쉬소 가능하게 만들어야함
+
+```kotlin
+fun main() = runBlocking {
+    val job = launch {
+        var i = 0
+        // CPU 집중 루프이기 때문에 delay 등이 없어 취소되지 않음
+        while (i < 1000) {
+            // 취소 가능하게 만들기 위한 체크
+            if (!isActive) {
+                println("취소 요청 감지됨. 종료함.")
+                break
+            }
+            println("일하는 중... $i")
+            i++
+        }
+    }
+
+    delay(100) // 잠시 기다림
+    println("main: 취소 요청")
+    job.cancel() // 취소 요청
+    job.join()   // 취소 완료 기다림
+    println("main: 완료")
+}
+```
+
+## 15.2.6 코루틴이 취소됐는지 확인
+
+- 코루틴이 취소됐는지 확인할 때는 `CoroutineScope` 의 `isActive` 속성을 확인함. 이 갑이 `false` 라면 코루틴은 더 이상 활성 상태가 아님
+- 이 경우 현재 작업을 완료하고, 획득한 리소스를 닫은 후 반환할 수 있음
+- `isActive` 를 확인해서 `false` 일 때 명시적을 반환하는 대신 코틀린 코루틴은 편의 함수로 `ensureActive` 를 제공. 이 함수는 코루틴이 더이상 활성 상태가 아닐 경우 `CancellationException` 을 던짐
+
+| **항목** | isActive | ensureActive() |
+| --- | --- | --- |
+| 반환값 | Boolean (true or false) | 취소되면 **예외 발생** |
+| 용도 | 수동으로 분기 처리할 때 | 취소되면 **즉시 중단하고 예외 처리**하고 싶을 때 |
+| 위치 | 반복문, 계산 루프 등 | 반복문, 무한 루프, 처리 순서 중단 지점 |
+
+## 15.2.7 다른 코루틴에게 기회를 주기:  yield 함수
+
+- `yield` 함수는 코드 안에서 취소 가능 지점을 제공할 뿐만 아니라 현재 점유된 디스패처에서 다른 코루틴이 작업할 수 있게 해줌
+
+```kotlin
+fun main() = runBlocking {
+    val job1 = launch {
+        repeat(5) { i ->
+            println("Job 1 - Step $i")
+            yield() // 다른 코루틴에게 기회 주기
+        }
+    }
+
+    val job2 = launch {
+        repeat(5) { i ->
+            println("Job 2 - Step $i")
+            yield()
+        }
+    }
+
+    joinAll(job1, job2)
+    println("모든 작업 완료")
+}
+
+/* 결과
+Job 1 - Step 0  
+Job 2 - Step 0  
+Job 1 - Step 1  
+Job 2 - Step 1  
+...  
+모든 작업 완료
+*/ 
+```
+
+## 15.2.8 리소스를 얻을 때 취소를 염두에 두기
+
+- **코루틴이 취소되었는지 확인하지 않고 리소스를 얻거나 보유하면 위험**함.
+- 예: 파일 열기, 데이터베이스 커넥션, 락(`lock`) 획득 등의 작업 중 코루틴이 취소되면
+    
+    → **리소스를 제대로 정리하지 못해 누수 발생** 가능.
+    
+- 따라서, **리소스를 얻기 전에 취소 여부를 확인하거나**, **`try-finally` 또는 `use` 블록을 활용해 정리 작업을 보장**해야 함.
+
+```kotlin
+// 예제: 취소된 상태에서 리소스를 획득하지 않도록 방지
+val job = launch {
+    if (!isActive) return@launch // 취소되었으면 리소스 획득하지 않음
+
+    val file = File("data.txt")
+    file.bufferedReader().use { reader -> // use 블록으로 안전하게 정리
+        reader.lineSequence().forEach {
+            println(it)
+            delay(100) // 처리 중에도 취소될 수 있음
+        }
+    }
+}
+```
+
+```kotlin
+// 예제 2: 취소된 상태에서 락 획득하지 않기
+val lock = ReentrantLock()
+
+val job = launch {
+    ensureActive() // 취소됐으면 예외 발생해서 중단
+    lock.lock()
+    try {
+        // 작업 수행
+    } finally {
+        lock.unlock()
+    }
+}
+```
+
+## 15.2.9 프레임워크가 여러분 대신 취소를 할 수 있다.
+
+- 많은 코루틴 기반 프레임워크 (예: **`Jetpack Compose**, **Ktor**, **Spring WebFlux**` 등)는 내부적으로 **상황에 따라 자동으로 코루틴을 취소**해줌
+- **Android의 `ViewModel` + `viewModelScope`**
+    - `ViewModel`이 소멸되면 `viewModelScope`에 포함된 모든 코루틴이 자동으로 `cancel()`
+    
+    ```kotlin
+    viewModelScope.launch {
+        // ViewModel이 없어지면 자동으로 취소됨
+    }
+    ```
+    
+- **Jetpack Compose의 `LaunchedEffect`**
+    - `Composable`이 `recomposition`으로 바뀌거나 없어지면
+        
+        → 내부의 코루틴도 자동으로 취소됨
+        
+    
+    ```kotlin
+    LaunchedEffect(key) {
+        // 이전 key에 해당하는 블록은 자동으로 cancel됨
+    }
+    ```
+    
+- **Ktor**
+    - 클라이언트 연결이 끊기면 요청을 처리하던 코루틴도 자동으로 취소됨
+
+```kotlin
+// Compose의 LaunchedEffect 
+@Composable
+fun SampleScreen(query: String) {
+    LaunchedEffect(query) {
+        // query가 변경되면 이전 코루틴은 취소되고, 새로운 코루틴이 실행됨
+        search(query)
+    }
+}
+```
+
+</details>
