@@ -867,3 +867,155 @@ fun concurrentFlow(): Flow<Int> = channelFlow {
 | 내부 구조 | 단일 코루틴 | 내부적으로 채널 + 다중 코루틴 |
 | 사용 시점 | 단순 스트림 처리 | 동시성 필요할 때 (e.g. 여러 emit 병렬 처리) |
 </details>
+
+
+<details>
+<summary><strong>16.3 Hot Flow</strong></summary>
+
+- 배출과 수집이라는 같은 전체적 구조를 따르기는 하지만 `hot flow` 는 `cold flow` 와 다른 여러 속성을 가지고 있음
+- `hot flow` 에서는 각 수집자가 플로우 로직 실행을 독립적으로 촉발하는 대신, 여러 구독자라고 불리는 수집자들이 배출된 항목을 공유함
+- 시스템에서 이벤트나 상태변경이 발생해서 수집자가 존재하는 여부에 상관없이 값을 배출해야하는 경우에 적합
+- 2가지 `hot flow` 구현이 기본적으로 제공
+    - `shared flow` : 값을 브로드캐스트하기 위해 사용됨
+    - `state flow` : 상태를 전달하는 특별한 경우에 사용됨
+- 실제로는 `state flow` 를 `shared flow` 보다 더 자주 사용하게 될 것
+
+## 16.3.1 공유 플로우(`SharedFlow`)는 값을 구독자에게 브로드캐스트한다
+
+- `SharedFlow` 는 구독자가 존재하는지 여부에 상관없이 배출이 발생하는 브로드캐스트 방식으로 동작
+- 이런 브로드캐스트 동작을 보여주기 위해 실제 라디오 방송국을 모델링할 수 있음
+- 이런 수상한 라디오 방송국들은 실제로 존재하며, 전세계 스파이에게 개방 주파수를 통해 암호화된 메시지를 전송함, 스파이는 이를 청취하고 메시지를 해독하고 시도할 수 있음
+
+```kotlin
+class RadioStation {
+		// 새 가변 공유 플로우를 비공개 프로퍼티로 정의
+    private val _messageFlow = MutableSharedFlow<Int>() 
+    // 공유 플로우에 대한 읽기 전역 뷰를 제공함 
+    val messageFlow: SharedFlow<Int> = _messageFlow
+
+		fun beginBroadcasting(scope: CoroutineScope) {
+        scope.launch {
+	        while(true) {
+		        delay(500.milliseconds)
+		        val number = Random.nextInt(0..10)
+		        log("Emitting $number")
+		        _messageFlow.emit(number) // 코루틴에서 가변 공유플로우에 값을 배출 
+	        }
+        
+        }
+    }
+}
+```
+
+- 코드로 부터 `SharedFlow` 같은 `hot flow` 를 만드는 방식이  `cold flow` 와 다르다는것을 알 수 있음
+- 플로우 빌더를 사용하는 대신 가변적인 플로우에 대한 참조를 얻음
+- 배출이 구독자 유무와 관계없이 발생하므로 여러분이 실제 배출을 수행하는 코루틴을 시작할 책임이 있음
+- 이는 별다른 어려움 없이 여러분이 여러 코루틴에서 가변 공유 플로우에 값을 배출할 수 있다는 뜻
+
+```kotlin
+fun main() = runBlocking {
+	 RadioStation().beginBroadcasting(this)
+}
+
+/*
+[main @coroutine#2] Emitting 2!
+[main @coroutine#2] Emitting 10!
+[main @coroutine#2] Emitting 4!
+
+*/
+```
+
+- `RadioStation` 클래스의 인스턴스를 생성하고 `beginBroadcasting` 함수를 호출하면 구독자가 없어도 브로드 캐스트가 즉시 시작됨
+
+```kotlin
+fun main() = runBlocking {
+    val station = RadioStation()
+    station.beginBroadcasting(this)
+
+		delay(600.milliseconds)
+		station.messageFlow.collect {
+			log("A collecting $it")
+		}
+}
+```
+
+- 구독자를 추가하는 방법은 콭드플로우를 수집하는 것과 동일, 그냥 `collect` 를 호출하면 됨
+
+### *✍️  핫 플로우 이름 붙일 때 밑줄 쓰기*
+
+- 공유플로우에서 비공개 변수 이름에 밑줄을 사용하고 공개 변셔에 밑줄을 쓰지 않는 패턴을 따르는 이유는 무엇일까?
+    - 코틀린에서는 `private` 과 `public` 프로퍼티에 대해 서로 다른 타입을 부여하는 기능을 지원하지 않음
+    - 플로우의 가변 버전을 `private` 으로 정의하고, 읽기 전용 타입인 `SharedFlow<T>` 속성을 `public` 으로 노출하면 공유 플로우의 가변 부분을 플로우를 소비하는 클래스에게 노출하지 않을 수 있음
+    - 이는 캡슐화와 정보 은닉이라는 관심사에 따른 것
+    - 무엇보다 클래스의 소비자는 보통 플로우를 구독하기만 할 뿐, 원소를 배출하지 않아야함
+    - 어떤 프로퍼티에 클래스 안에서 접근할 때와 클래스 밖에서 접근할때 다른 타입을 지정하는 기능은 코틀린 2.x 추가될 예정이라고 함
+
+### 🤔 구독자를 위한 값 재생
+
+- 공유 플로우 구독자는 구독을 시작한 이후에 배출된 값만 수신
+- 구독자가 구독 이전에 배출된 원소도 수신하기를 원한다면 `MutableSharedFlow` 를 생성할때 `replay` 파라미터를 사용해 새 구독자를 위해 제공할 값의 캐시를 설정할 수 있음
+
+### `ShareIn` 으로 콜드 플로우를 공유 플로우로 전환
+
+- `shareIn()`은 `콜드 플로우(cold flow)` 를 S`haredFlow(hot flow)` 로 변환해주는 연산자
+- 변환된 SharedFlow는 하나의 플로우를 여러 구독자가 동시에 공유할 수 있게 해줌
+- 기본적으로 `Flow`는 `collect()`가 호출될 때마다 새로 실행되지만, `shareIn()`을 사용하면 값 생성은 한 번만 발생하고, 여러 구독자가 동일한 값을 공유하게 됨
+
+## 16.3.2 시스템 상태 추적: 상태 플로우
+
+- 동시 시스템에서 자주 발생하는 특별한 사례는 시간이 지남에 따라 변할 수 있는 값, 즉 상태를 추적하는 것
+- `StateFlow`에서는 `emit()` 대신 `update()` 함수를 사용
+
+### 🤔 UPDATE 함수로 안전하게 상태 플로우에 쓰기
+
+- `MutableStateFlow`에는 상태 값을 안전하게 갱신할 수 있는 `update { }` 확장 함수가 제공됨
+- 이 함수는 현재 값에 기반해 새 값을 계산하고 설정함
+- 내부적으로 CAS(compare-and-set) 방식으로 동작하므로, 멀티스레드 환경에서도 안전하게 동시 수정 가능
+
+### 🤔 `stateIn` 으로 콜드 플로우를 상태 플로우로 변환하기
+
+- `stateIn()`은 콜드 플로우(Flow) 를 핫 플로우(StateFlow) 로 전환하는 연산자
+- 이로써 항상 최신 상태 값을 보존하고, 구독 시 즉시 현재 값을 받을 수 있는 흐름으로 바뀜
+- 일반 `Flow`는 `collect`마다 다시 실행되지만, `stateIn`을 사용하면 동일한 상태를 유지하면서 여러 구독자가 공유 가능
+- 또한 구독자는 항상 가장 최신 값을 받을 수 있음
+
+## 16.3.3 상태 플로우와 공유 플로우의 비교
+
+| **항목** | **StateFlow** | **SharedFlow** |
+| --- | --- | --- |
+| **핵심 목적** | 시스템 **상태(state)** 추적 | **이벤트(event)** 브로드캐스트 |
+| **초기값 필요** | ✅ 필요 (initialValue) | ❌ 필요 없음 |
+| **최신값 보관** | ✅ 항상 최신 상태 유지 (value 속성 제공) | ❌ 값을 저장하지 않음 (옵션: replay) |
+| **구독 시 즉시 값 수신** | ✅ 항상 현재 값 즉시 수신 | ❌ 기본값은 이후 emit부터 수신 |
+| **값 설정 방법** | value = ..., update {} | emit() 또는 tryEmit() |
+| **사용 예** | UI 상태, 설정 값, 로딩 상태 등 | 버튼 클릭, 메시지 알림, 이벤트 스트림 등 |
+| **replay 기능** | ❌ 없음 (항상 1개의 현재값만 유지) | ✅ 설정 가능 (replay = N) |
+- 실무에서는 보통 StateFlow를 더 자주 사용하게 됨
+    
+    → 상태 관리가 대부분의 앱에서 핵심이기 때문.
+    
+- SharedFlow는 일회성 이벤트 처리에 탁월
+    
+    → 예: 로그인 성공 알림, 네비게이션 트리거 등
+    
+
+## 16.3.4 핫 플로우, 콜드 플로우, 공유 플로우, 상태 플로우: 언제 어떤 플로우를 사용할까?
+
+| **항목** | **🧊 Cold Flow** | **🔥 Hot Flow** |
+| --- | --- | --- |
+| **실행 시점** | collect() 호출 시마다 새로 시작됨 | 외부에서 이미 emit되고 있음 |
+| **수집자(구독자)** | 각 수집자가 **독립적으로 실행** | 여러 수집자가 **공유**해서 같은 흐름을 수신 |
+| **emit 시점** | collect가 있어야만 emit 발생 | collect 여부와 상관없이 emit 가능 |
+| **대표 클래스** | flow {}, flowOf() 등 | SharedFlow, StateFlow, channelFlow 등 |
+| **예시** | 리스트 필터링, 계산, 단일 네트워크 요청 | UI 상태, 알림, 이벤트 스트림 |
+| **데이터 반복** | 항상 처음부터 다시 수행 | 최신값 유지 또는 이어서 흐름 제공 |
+| **비유** | 넷플릭스: 각자 원하는 때에 시청 | 라디오: 방송은 계속되고 있고, 지금부터 들을 수 있음 |
+
+| **시나리오** | **적합한 플로우** |
+| --- | --- |
+| 이벤트 브로드캐스트 (ex. 버튼 클릭) | SharedFlow |
+| 앱/화면 상태 관리 (ex. 로딩 상태, 로그인 상태) | StateFlow |
+| 계산이나 반복 가능한 작업 (ex. 리스트 처리) | Cold Flow |
+| 외부 시스템에서 계속 발생하는 데이터 수신 | SharedFlow 또는 channelFlow |
+| 비동기 흐름이지만 현재 값을 항상 기억해야 함 | StateFlow |
+</details>
