@@ -1171,3 +1171,22 @@ flowOf(1, 2, 3)
 - `flowOn(dispatcher)`은 플로우의 업스트림 연산을 지정한 코루틴 컨텍스트에서 실행 (백그라운드 처리, 스레드 전환, UI 블로킹 방지)
 - 
 </details>
+
+<details>
+<summary><strong>17.3 커스텀 중간 연산자 만들기 </strong></summary>
+
+- 코틀린 코루틴 라이브러리는 플로우를 조작할 수 있는 다양한 연산자를 제공함
+- 하지만 이런 연산자들이 내부적으로 어떻게 동작하며, 어떻게 우리가 직접 커스텀 중간 연산자를 만들수 있을까?
+- 코틀린 코루틴의 Flow는 `map`, `filter`, `debounce` 등 다양한 중간 연산자를 제공함
+- 이 연산자들은 내부적으로 `flow` 빌더와 `emit`를 활용해 동작함
+- 사용자가 직접 자신만의 중간 연산자를 만들 수 있음
+- `Flow<T>`를 확장 함수 형태로 만들고, 내부에서는 새로운 `flow {}`를 반환하며 `collect`로 `upstream` 값을 수집해서 가공하고 `emit` 함
+
+```kotlin
+fun Flow<Int>.filterEven(): Flow<Int> = flow {
+    collect { value ->
+        if (value % 2 == 0) emit(value)
+    }
+}
+```
+</details>
