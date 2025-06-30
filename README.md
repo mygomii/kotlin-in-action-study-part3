@@ -1190,3 +1190,40 @@ fun Flow<Int>.filterEven(): Flow<Int> = flow {
 }
 ```
 </details>
+
+<details>
+<summary><strong>17.4 최종 연산자는 업스트림 플로우를 실행하고 값을 계산한다</strong></summary>
+	
+- 중간 연산자는 주어진 플로우를 다른 플로우로 변환하지만 실제로 코드를 실행하지 않음
+- 실행은 최종 연산자가 담당
+- 최종 연산자는 단일 값이나 값의 컬렉션을 계산하거나, 플로우의 실행을 촉발시켜 지정된 연산과 부수 효과를 수행함
+- 가장 일반적인 최종 연산자는 `collect`
+- `collect` 는 플로우의 각 원소에 대해 실행할 람다를 지정할 수 있는 유용한 지름길을 제공
+- 이제는 중간 연산자를 배웠기 때문에 이 지름길 코
+- 드가 `onEach` 를 호출한 다음에 파라미터 없는 `collect` 를 호출하는 코드와 같다는 사실을 짐작할 수 있음
+
+ 
+
+```kotlin
+fun main() = runBlocking {
+    getTemperatures()
+    .onEach {
+	log(it)
+    }
+    .collect() 
+}
+```
+
+- 최종 연산자는 업스트림 플로우의 실행을 담당하기 때문에 항상 일시 중단 함수
+- `collect` 를  호출하면 플로우 전체가 수집될 때까지 일시 중단함
+- `first` 나 `firstOrNull` 같은 다른 최종 연산자는 원소를 받은 다음에 업스트림 플로우를 취소할 수 있음
+
+## 17.4.1 프레임워크는 커스텀 연산자를 제공한다.
+
+- `collectAsState()` (Jetpack Compose):
+    - `StateFlow`나 `Flow`를 `Compose`의 상태로 변환하는 최종 연산자
+    - 실제로는 collect를 내부에서 수행하며 recomposition을 트리거함
+- `launchIn(scope)`:
+    - 별도의 `collect` 없이 지정된 `scope`에서 플로우를 시작시킴
+    - `collect {}` 없이 side-effect만 수행할 때 유용
+</details>
