@@ -1227,3 +1227,43 @@ fun main() = runBlocking {
     - 별도의 `collect` 없이 지정된 `scope`에서 플로우를 시작시킴
     - `collect {}` 없이 side-effect만 수행할 때 유용
 </details>
+
+<hr>
+<details>
+<summary><strong>18.1 코루틴 내부에서 던져진 오류 처리</strong></summary>
+
+- 코루틴 안에서 예외가 발생하면 기본적으로 코루틴은 취소되고, 예외는 상위로 전파됨
+- `try/catch` 구문을 사용하면 코루틴 내부에서 발생한 예외를 지역적으로 처리 가능함
+- 하지만 `launch`와 `async`의 예외 처리 방식은 다르다는 점을 이해해야 함
+
+| **빌더** | **예외 처리 방식** |
+| --- | --- |
+| launch | 예외가 발생하면 **즉시 전파됨** (try/catch로 잡아야 함) |
+| async | 예외가 **await()를 호출할 때까지 연기됨** (이때 try/catch 필요) |
+
+```kotlin
+val job = scope.launch {
+    try {
+        throw RuntimeException("예외 발생")
+    } catch (e: Exception) {
+        println("launch 블록에서 예외 처리됨: ${e.message}")
+    }
+}
+
+val deferred = scope.async {
+    throw RuntimeException("예외 발생") // 이 시점엔 예외 전파 X
+}
+
+try {
+    deferred.await()  // 여기서 예외 발생
+} catch (e: Exception) {
+    println("async 결과 await 중 예외 처리됨: ${e.message}")
+}
+```
+
+- 예외는 구조화된 동시성에도 영향을 준다
+    
+    → 하나의 자식 코루틴이 예외로 종료되면, 그 스코프 내의 모든 형제 코루틴도 함께 취소됨
+    
+- 따라서 예외 발생 위치와 처리 범위를 명확히 구분해야 함
+</details>
