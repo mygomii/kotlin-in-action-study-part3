@@ -1267,3 +1267,86 @@ try {
     
 - 따라서 예외 발생 위치와 처리 범위를 명확히 구분해야 함
 </details>
+
+
+<details>
+<summary><strong>18.2 코틀린 코루틴에서의 오류 처리</strong></summary>
+
+## 18.2.1 자식이 실패하며 모든 자식을 취소하는 코루틴
+
+- 하나의 자식 코루틴이 예외로 실패하면, 같은 스코프에 있는 다른 모든 자식 코루틴도 자동으로 취소됨
+- 이는 코틀린 코루틴의 `구조화된 동시성(Structured Concurrency)`의 핵심 동작 방식임
+
+### **실전에서는?**
+
+- 이 방식은 오류가 전체 작업 흐름에 영향을 줘야 할 때 매우 유용
+    
+    (예: 모든 하위 작업이 성공해야만 하는 트랜잭션성 처리)
+    
+- 만약 자식 간 영향을 **분리하고 싶다면**
+    
+    →  supervisorScope 또는 SupervisorJob을 사용해야 함 
+    
+
+- `SupervisorJob`은 한 자식 코루틴의 실패가 다른 자식 코루틴에 영향을 주지 않도록 하는 `Job`
+- 기본 `Job`과 달리, 자식 중 하나가 실패하더라도 나머지 자식은 계속 실행됨
+
+| **구분** | **일반** Job | SupervisorJob |
+| --- | --- | --- |
+| 자식이 실패하면? | 형제 자식도 모두 **자동 취소됨** | **영향 없음**, 다른 자식은 계속 실행 |
+| 예시 상황 | 트랜잭션, 전부 성공해야 함 | 일부 실패해도 나머지는 처리해야 함 |
+
+```kotlin
+val scope = CoroutineScope(SupervisorJob())
+
+scope.launch {
+    launch {
+        delay(100)
+        throw RuntimeException("💥 자식 1 실패")
+    }
+
+    launch {
+        try {
+            delay(1000)
+            println("✅ 자식 2 성공")
+        } catch (e: CancellationException) {
+            println("❌ 자식 2도 취소됨") // 이 줄은 실행되지 않음
+        }
+    }
+}
+```
+
+- 이 코드에서는 자식 1이 실패해도, 자식 2는 계속 실행되고 정상 완료됨
+
+---
+
+- `supervisorScope {}` 는 코루틴 스코프 내 자식 코루틴 간의 예외 전파를 막아주는 구조화된 스코프
+- 하나의 자식이 실패하더라도 다른 자식 코루틴은 영향을 받지 않고 계속 실행됨
+- `SupervisorJob`과 비슷한 기능을 하지만, `CoroutineScope` 없이 함수 블록으로 바로 사용 가능하다는 차이가 있음
+
+```kotlin
+import kotlinx.coroutines.*
+
+fun main() = runBlocking {
+    supervisorScope {
+        launch {
+            delay(100)
+            throw RuntimeException("💥 자식 1 실패")
+        }
+
+        launch {
+            delay(500)
+            println("✅ 자식 2 성공")  // 여긴 정상 출력됨
+        }
+    }
+}
+```
+
+- 자식 1은 예외로 실패하고
+- 자식 2는 **취소되지 않고 그대로 수행**됨
+
+| **스코프 종류** | **자식 간 예외 전파** | **사용 목적** |
+| --- | --- | --- |
+| coroutineScope | ✅ 예외 전파함 | 트랜잭션, 전체 성공 필요 |
+| supervisorScope | ❌ 예외 전파 안함 | 일부 실패 허용, 독립 실행 |
+</details>
