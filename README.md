@@ -1350,3 +1350,56 @@ fun main() = runBlocking {
 | coroutineScope | ✅ 예외 전파함 | 트랜잭션, 전체 성공 필요 |
 | supervisorScope | ❌ 예외 전파 안함 | 일부 실패 허용, 독립 실행 |
 </details>
+
+<details>
+<summary><strong>18.3 CoroutineExceptionHandler: 예외 처리를 위한 마지막 수단</strong></summary>
+
+- `CoroutineExceptionHandler`는 **코루틴에서 발생한 처리되지 않은 예외를 잡는 전역 핸들러**
+- 특히 **`launch`에서 발생한 예외**는 `try/catch`로 처리하지 않으면 상위로 전파되고, 이때 이 핸들러가 개입함.
+- **UI 앱, 서버 애플리케이션에서 안정성을 높이기 위한 안전망** 역할을 함.
+
+```kotlin
+val handler = CoroutineExceptionHandler { _, exception ->
+    println("❗ 전역 예외 처리됨: ${exception.message}")
+}
+
+val scope = CoroutineScope(Dispatchers.Default + handler)
+
+scope.launch {
+    throw RuntimeException("예외 발생!")
+}
+```
+
+| **특징** | **설명** |
+| --- | --- |
+| 적용 대상 | **launch 기반 코루틴에서 처리되지 않은 예외** |
+| async에는? | ❌ 직접 await()에서 예외 처리 필요 |
+| 처리 시점 | 예외가 상위로 전파되기 전에 **한 번만 호출됨** |
+| 흔한 사용처 | 로그 기록, 앱 크래시 방지, 알림 표시, 서버 경고 등 |
+- `ViewModelScope` 내부에서는`CoroutineExceptionHandler`가작동하지 않음
+- `viewModelScope.launch { ... }` 안에서 예외가 발생하면, `CoroutineExceptionHandler`를 붙여도 콜백이 호출되지 않음
+- 이유는 `viewModelScope`의 `Job`이 `SupervisorJob` 기반이기 때문
+
+```kotlin
+viewModelScope.launch {
+    try {
+        repository.loadData()
+    } catch (e: Exception) {
+        _uiState.value = UiState.Error(e.message ?: "오류 발생")
+    }
+}
+```
+
+```kotlin
+private val _uiState = MutableStateFlow<UiState>(UiState.Loading)
+val uiState: StateFlow<UiState> = _uiState
+
+sealed class UiState {
+    object Loading : UiState()
+    data class Success(val data: String) : UiState()
+    data class Error(val message: String) : UiState()
+}
+```
+
+- `CoroutineExceptionHandler`는 `launch`에는 유효하지만 `viewModelScope`에서는 작동하지 않기 때문에예외를 직접 잡고 UI 상태로 전달하는 패턴
+</details>
