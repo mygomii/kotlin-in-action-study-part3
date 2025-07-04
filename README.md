@@ -1403,3 +1403,44 @@ sealed class UiState {
 
 - `CoroutineExceptionHandler`는 `launch`에는 유효하지만 `viewModelScope`에서는 작동하지 않기 때문에예외를 직접 잡고 UI 상태로 전달하는 패턴
 </details>
+
+<details>
+<summary><strong>18.4 플로우에서 예외처리</strong></summary>
+
+- `catch { }` 연산자
+    - 플로우 수집 중 발생한 예외를 잡는 연산자
+    - `emit` 이후부터 수집 단계까지의 예외를 잡을 수 있음
+    - `collect` 이후에는 못 잡음 → 이때는 `try/catch`로 감싸야함
+    
+    ```kotlin
+    flow {
+        emit(1)
+        throw RuntimeException("예외 발생")
+    }.catch { e ->
+        emit(-1) // 예외 발생 시 기본값 emit
+    }
+    ```
+    
+- `onCompletion { }` 연산자
+    - 정상 종료든 예외든 무조건 호출됨
+    - 종료 원인을 cause 인자로 전달받음
+    - 자원 정리, 로깅 등에 활용
+    
+    ```kotlin
+    flow
+        .onCompletion { cause -> println("끝남, 원인: $cause") }
+    ```
+    
+- `try/catch vs catch`
+    - `try/catch`는 `collect` 호출부 바깥에서 예외 잡을 때 사용
+    - `catch`는 `flow` 내부에서 예외 흐름을 조절할 때 사
+- `retry` 연산자
+    - 예외가 발생하면 재시도하게 해주는 연산자
+    - 최대 재시도 횟수나 조건 등을 지정 가능
+    
+    ```kotlin
+    flow
+        .retry(3) { e -> e is IOException } // IOException만 3회까지 재시도
+        .collect { ... }
+    ```
+</details>
